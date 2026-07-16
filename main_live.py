@@ -11,6 +11,11 @@ main_live.py — автономный режим: сам тянет данные
 
 Запуск в цикле (например каждые 15 минут, строго по часам: :00 :15 :30 :45):
     python3 main_live.py --loop 900
+
+По умолчанию в режиме --loop каждый снапшот целиком отправляется в Telegram
+(если настроен secrets.json), а не только алерты по значимым событиям.
+Чтобы отключить это и получать в Telegram только алерты — добавь флаг:
+    python3 main_live.py --loop 900 --no-tg-snapshots
 """
 
 import sys
@@ -23,12 +28,12 @@ from wall_analyzer import detect_wall_melt, detect_confluence
 from expiry_guard import check_expiry_guard
 from signal_engine import build_verdict
 from alert_rules import check_events
-from alert_notifier import send_alert
+from alert_notifier import send_alert, notify_telegram
 import storage
 from main import format_output  # переиспользуем готовый форматтер вывода
 
 
-def run_once():
+def run_once(send_snapshots_to_telegram: bool = False):
     try:
         parsed = build_live_snapshot()
     except Exception as e:
@@ -46,7 +51,11 @@ def run_once():
     expiry_result = check_expiry_guard(parsed.get("ts_iso"))
     verdict = build_verdict(parsed, iv_result, melt_result, confluence, expiry_result)
 
-    print("\n" + format_output(parsed, iv_result, melt_result, confluence, expiry_result, verdict))
+    output_text = format_output(parsed, iv_result, melt_result, confluence, expiry_result, verdict)
+    print("\n" + output_text)
+
+    if send_snapshots_to_telegram:
+        notify_telegram(output_text)
 
     events = check_events(parsed, previous, verdict, melt_result, iv_result)
     if events:
@@ -75,22 +84,26 @@ def seconds_until_next_boundary(interval_sec: int) -> float:
 
 
 def main():
+    tg_snapshots = "--no-tg-snapshots" not in sys.argv
+
     if "--loop" in sys.argv:
         idx = sys.argv.index("--loop")
         interval = int(sys.argv[idx + 1]) if len(sys.argv) > idx + 1 else 900
         print(f"Автономный режим: обновление каждые {interval} сек, строго по часам. Ctrl+C для остановки.")
+        if tg_snapshots:
+            print("Каждый снапшот будет отправляться в Telegram целиком.")
 
         # первый запуск — сразу, для проверки, что всё работает
-        run_once()
+        run_once(send_snapshots_to_telegram=tg_snapshots)
 
         while True:
             wait = seconds_until_next_boundary(interval)
-            next_time = datetime.now(timezone.utc).astimezone()
             print(f"\n⏳ Следующий снапшот через {int(wait)} сек...")
             time.sleep(wait)
-            run_once()
+            run_once(send_snapshots_to_telegram=tg_snapshots)
     else:
-        run_once()
+        # разовый запуск — снапшот в Telegram шлём тоже, если явно не отключили
+        run_once(send_snapshots_to_telegram=tg_snapshots)
 
 
 if __name__ == "__main__":
