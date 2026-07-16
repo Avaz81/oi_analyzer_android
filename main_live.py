@@ -9,12 +9,13 @@ main_live.py — автономный режим: сам тянет данные
 Запуск разово:
     python3 main_live.py
 
-Запуск в цикле (например каждые 15 минут):
+Запуск в цикле (например каждые 15 минут, строго по часам: :00 :15 :30 :45):
     python3 main_live.py --loop 900
 """
 
 import sys
 import time
+from datetime import datetime, timezone
 
 from live_report_builder import build_live_snapshot
 from iv_analyzer import analyze_iv
@@ -49,14 +50,35 @@ def run_once():
     print(f"\n(снапшот сохранён, всего в истории: {storage.count_snapshots()})")
 
 
+def seconds_until_next_boundary(interval_sec: int) -> float:
+    """
+    Секунды до ближайшей "круглой" отметки по часам (например :00 :15 :30 :45
+    при interval_sec=900). Считается от начала текущих суток UTC, чтобы
+    отметки были предсказуемыми и совпадали с ожиданиями пользователя.
+    """
+    now = datetime.now(timezone.utc)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = (now - midnight).total_seconds()
+    remainder = elapsed % interval_sec
+    wait = interval_sec - remainder if remainder > 0 else 0
+    return wait
+
+
 def main():
     if "--loop" in sys.argv:
         idx = sys.argv.index("--loop")
         interval = int(sys.argv[idx + 1]) if len(sys.argv) > idx + 1 else 900
-        print(f"Автономный режим: обновление каждые {interval} сек. Ctrl+C для остановки.")
+        print(f"Автономный режим: обновление каждые {interval} сек, строго по часам. Ctrl+C для остановки.")
+
+        # первый запуск — сразу, для проверки, что всё работает
+        run_once()
+
         while True:
+            wait = seconds_until_next_boundary(interval)
+            next_time = datetime.now(timezone.utc).astimezone()
+            print(f"\n⏳ Следующий снапшот через {int(wait)} сек...")
+            time.sleep(wait)
             run_once()
-            time.sleep(interval)
     else:
         run_once()
 
