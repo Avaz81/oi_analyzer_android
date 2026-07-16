@@ -22,6 +22,8 @@ from iv_analyzer import analyze_iv
 from wall_analyzer import detect_wall_melt, detect_confluence
 from expiry_guard import check_expiry_guard
 from signal_engine import build_verdict
+from alert_rules import check_events
+from alert_notifier import send_alert
 import storage
 
 
@@ -108,6 +110,12 @@ def main():
     verdict = build_verdict(parsed, iv_result, melt_result, confluence, expiry_result)
 
     print("\n" + format_output(parsed, iv_result, melt_result, confluence, expiry_result, verdict))
+
+    events = check_events(parsed, previous, verdict, melt_result, iv_result)
+    if events:
+        print(f"\n🔔 Отправляю {len(events)} алерт(ов)...")
+        for ev in events:
+            send_alert(ev["title"], ev["message"])
 
     storage.save_snapshot(parsed)
     print(f"\n(снапшот сохранён в базу, всего в истории: {storage.count_snapshots()})")
